@@ -2,6 +2,8 @@
 
 Educational kernel. One increment at a time. Do not skip ahead.
 
+What the five steps mean is in `docs/steps.md`. Design notes live in `docs/implementation.md`. Update that file at the end of every increment.
+
 ## Phase 1 — QEMU (mps2-an386)
 
 | Step | Status | What exists |
