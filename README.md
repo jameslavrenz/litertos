@@ -1,8 +1,8 @@
 # LiteRTOS
 
-A small teaching real-time kernel for ARM Cortex-M4. It is written from scratch so each scheduling mechanism stays visible. FreeRTOS, Zephyr, and other existing kernels are not used.
+LiteRTOS is a bare-metal real-time kernel for Arm Cortex-M4, implemented in C11 and Arm assembly. It provides direct control of task stacks and CPU context switching without using FreeRTOS, Zephyr, or another existing kernel. Development is progressing toward fixed-priority preemptive scheduling, SysTick-based timing, PendSV context switches, and synchronization primitives.
 
-The firmware prints text on a serial port. That text is how you see what the core did. There is no graphical interface.
+Phase 1 targets QEMU's `mps2-an386` Cortex-M4 machine; the planned Phase 2 target is an STM32F446 Nucleo board. Serial output captures kernel and task activity without a graphical interface.
 
 ## Status
 
@@ -16,7 +16,7 @@ Phase 1 runs under QEMU's `mps2-an386` Cortex-M4 board. Phase 2, later, is a phy
 | 4 | SysTick preemption through PendSV | not started |
 | 5 | Delays, semaphores, mutexes, faults | not started |
 
-`docs/steps.md` explains the ideas and how the steps differ. `docs/implementation.md` records what has been built, including register layouts and test results. `PROGRESS.md` is the short status list. Source files name their phase and step in the first comment.
+`docs/steps.md` tracks the kernel features and implementation stages. `docs/implementation.md` records what has been built, including register layouts and test results. `PROGRESS.md` is the short status list. Source files name their phase and step in the first comment.
 
 ## Requirements
 
