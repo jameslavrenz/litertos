@@ -1,8 +1,10 @@
 /*
- * Cortex-M initial stack frame.
+ * Phase 1 — QEMU mps2-an386. Shared with Phase 2 (STM32F446): yes.
+ * Step 1 — Task creation and stack initialization.
  *
- * Pure memory writes. No MSR/MRS, no exception, no PendSV. The goal is to
- * leave memory in the shape those instructions will expect later.
+ * Pure memory writes. No MSR/MRS, no exception, no PendSV. Step 2's
+ * SVC_Handler and Step 4's PendSV handler both restore this image.
+ * Step 3 and Step 5 do not change the frame layout.
  */
 #include "litert/task.h"
 

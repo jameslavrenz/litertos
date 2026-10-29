@@ -1,25 +1,27 @@
 # LiteRTOS implementation notes
 
-Running record of the kernel. **Step 1 is done.** Steps 2–5 are not started. The concept map for the five steps is `docs/steps.md`.
+Running record of the kernel. **Steps 1 and 2 are done.** Steps 3–5 are not started. The concept map for the five steps is `docs/steps.md`.
 
 Update this file at the end of every increment, before stopping. Add what changed, why, how it was tested, and one or two experiments. Do not leave a completed step described only in chat. Keep `PROGRESS.md` in sync with the status table below.
 
 One increment at a time. Do not implement the next step while updating this document.
+
+Source files name their phase and step in the first comment. Phase 1 is QEMU `mps2-an386`. Phase 2 is the STM32F446, which keeps the kernel files and replaces startup, the linker script, and the demo UART. Step 3's seam is `litert_switch_next()`. Step 4's seams are `SysTick_Handler` and `PendSV_Handler`. Step 5's seams are task state on the TCB and `HardFault_Handler`.
 
 ## Status
 
 | Step | Scope | Status |
 | --- | --- | --- |
 | 1 | Task creation and stack initialization | **done** |
-| 2 | Cooperative multitasking | not started |
+| 2 | Cooperative multitasking | **done** |
 | 3 | Cooperative scheduler | not started |
 | 4 | Preemptive multitasking | not started |
 | 5 | Kernel refinement | not started |
 | Phase 2 | STM32F446 Nucleo | not started |
 
-QEMU is not used in Step 1. It starts in Step 2, when the first task is launched, and stays the execution environment through Step 5. The physical board is Phase 2.
+QEMU is not used in Step 1. Step 2 runs on `mps2-an386`, and that machine stays the execution environment through Step 5. The physical board is Phase 2.
 
-There is no assembly yet. `litert_task_init()` only writes `uint32_t` slots. Loading the PSP, writing `CONTROL`, and returning through `EXC_RETURN` are Step 2.
+`litert_task_init()` only writes `uint32_t` slots. The assembly that loads the PSP and returns through `EXC_RETURN` is in `src/arch/cortex_m/context.s`.
 
 ## Step 1 — Task creation and stack initialization
 
@@ -32,9 +34,9 @@ A task control block and a fabricated Cortex-M stack frame. Nothing switches tas
 | File | Purpose |
 | --- | --- |
 | `include/litert/task.h` | TCB, frame indices, and the init contract |
-| `src/arch/cortex_m/task_stack.c` | Cortex-M frame construction. The only architecture-specific code so far |
+| `src/arch/cortex_m/task_stack.c` | Cortex-M frame construction. Step 1's architecture-specific code |
 | `tests/test_task_stack.c` | Host checks of layout, alignment, endianness, and rejection |
-| `Makefile` | Host `cc` build. No cross toolchain yet |
+| `Makefile` | `make test` for this step. The QEMU image was added in Step 2 |
 
 The kernel sources are about 210 physical lines, of which about 88 are declarations or executable code. The rest is the frame contract in comments.
 
@@ -191,27 +193,143 @@ No scheduler, no ready list, no SysTick, no PendSV, no task switch, no QEMU imag
 
 ### Next increment
 
-Step 2 begins by starting a single task under QEMU `mps2-an386`: startup code, a vector table, a linker script, load PSP from `tcb->sp`, and exception-return into that one task. No yield and no second task. The two-task switch is the following increment, still inside Step 2.
-
-The future first-task launch, not yet code, looks like this:
-
-```asm
-ldmia r0!, {r4-r11}    ; pop the software frame; r0 advances to the R0 slot
-msr   psp, r0          ; hardware unstack starts here
-mov   lr, #0xFFFFFFFD  ; EXC_RETURN: Thread mode, restore from PSP
-bx    lr               ; hardware pops R0–xPSR and jumps to the stacked PC
-```
-
-`0xFFFFFFFD` is `EXC_RETURN` in the handler LR. It is not the LR value stored in the frame.
+Step 2, now implemented below. The launch sequence that was only a sketch here is `SVC_Handler` in `src/arch/cortex_m/context.s`.
 
 ## Step 2 — Cooperative multitasking
 
-Not started. When this step is implemented, replace this section with:
+### What was built
 
-- how the first task is started, including the PSP and `EXC_RETURN` sequence
-- the assembly that saves and restores a context, and the register order it must share with Step 1
-- how explicit yield switches two tasks
-- the QEMU command, what was observed, and experiments
+Two tasks run on QEMU's `mps2-an386` Cortex-M4. Each calls `litert_yield()` to give the core to the other. Nothing preempts. A task that never yields keeps the processor. There is no priority and no ready list. A third `litert_task_create()` returns `LITERT_ERR_FULL`.
+
+The demo runs one function twice, with arguments `"A"` and `"B"`. The loop counter is a local, so it lives on that task's stack. The transcript alternating `A0` then `B0` then `A1` is the evidence that each stack is preserved across the switch.
+
+### Files
+
+| File | Purpose |
+| --- | --- |
+| `src/arch/cortex_m/startup.s` | Vector table, data copy, zero `.bss`, call `main` |
+| `src/arch/cortex_m/context.s` | `svc #0` and `SVC_Handler`, the whole switch |
+| `src/sched.c` | Create at most two tasks, and pick the other one |
+| `include/litert/sched.h` | `litert_task_create`, `litert_start`, `litert_yield` |
+| `src/demo_main.c` | The two workers and the UART prints |
+| `src/qemu_exit.s` | Semihosting exit so QEMU stops after `done` |
+| `linker/mps2-an386.ld` | Code at `0x00000000`, RAM at `0x20000000`, 4 MiB each |
+| `scripts/run_qemu.py` | Runs QEMU and checks the transcript |
+
+`task_stack.c` is unchanged. The handler consumes the frame that function builds.
+
+### Why the first start is an SVC
+
+`EXC_RETURN` (`0xFFFFFFFD`) is not a branch target in Thread mode. From `main`, a `bx` to that value would try to execute the address and fault. It means "leave Handler mode, return to Thread, unstack from the PSP" only when it is in LR during an exception handler.
+
+`litert_start()` therefore calls `litert_yield()`, which is:
+
+```asm
+svc #0
+bx  lr
+```
+
+That SVC is the first exception. `litert_running` is still 0, so the handler does not save `main`. It sets the flag, reloads MSP from `_estack` (`0x20400000`, the top of RAM) to drop the frame just pushed for `main`, then restores the first TCB. The `bx lr` after `svc` is not executed on this first call. Later yields do execute it: the hardware-stacked PC points at that `bx lr`, and the hardware-stacked LR points back at the task, so the task continues at the instruction after `litert_yield()`.
+
+The handler does not write `CONTROL`. Returning with bit 2 of `EXC_RETURN` set makes the processor select the PSP and set `CONTROL.SPSEL` itself.
+
+```
+0xFFFFFFFD
+  bit 4 = 1   integer stack frame, no floating-point context
+  bit 3 = 1   return to Thread mode
+  bit 2 = 1   unstack using the PSP
+```
+
+The assembler encodes the constant as `mvn.w lr, #2` because `~2 == 0xFFFFFFFD`. Same value, no literal pool.
+
+### Save and restore
+
+On a later yield the task is already in Thread mode on the PSP, so the processor pushes the hardware frame onto that task's stack before `SVC_Handler` runs. The handler body uses MSP.
+
+```asm
+mrs   r0, psp
+stmdb r0!, {r4-r11}       /* R4 at the lowest address, matching Step 1 */
+str   r0, [current]       /* TCB.sp is the first field */
+bl    litert_switch_next  /* returns the other TCB in r0 */
+ldr   r0, [r0]            /* that task's sp */
+ldmia r0!, {r4-r11}
+msr   psp, r0             /* now points at R0 of the hardware frame */
+ldr   lr, =0xFFFFFFFD
+bx    lr                  /* hardware pops R0, R1, R2, R3, R12, LR, PC, xPSR */
+```
+
+`litert_switch_next()` is the entire policy: if the current TCB is slot 0, select slot 1, and the reverse. `STMDB` of eight registers keeps the 8-byte alignment the hardware established when it stacked the exception frame.
+
+R4–R11 are the callee-saved registers. R0–R3, R12, LR, PC, and xPSR were already stacked by the processor. That split is why the software list is only `{r4-r11}` and why it must stay in that order.
+
+No other exception is enabled, so this handler is not re-entered. The switch is not yet guarded against a nested interrupt. PendSV, which will own the switch once a timer exists, is still a default infinite loop. SysTick is not configured.
+
+Tasks run privileged (`CONTROL.nPRIV` stays 0). The floating-point unit is not used; the image is built with `-mfloat-abi=soft`.
+
+If a task function returns, the initial LR (Thumb bit set) sends it to `litert_task_returned()`, which spins. The demo exits before either worker returns.
+
+### Memory and the UART
+
+| Region | Address | Use |
+| --- | --- | --- |
+| Code RAM | `0x00000000`, 4 MiB | Vector table and instructions |
+| Data RAM | `0x20000000`, 4 MiB | `.data`, `.bss`, task stacks |
+| MSP | `0x20400000` downward | Reset, SVC, and faults |
+| UART0 | `0x40004000` | CMSDK APB UART, QEMU serial port 0 |
+
+The demo sets `BAUDDIV` to 16 and `CTRL.TX_EN`, then writes bytes to the data register while `STATE.TXFULL` is clear. QEMU delivers those bytes to stdio.
+
+### How it was tested
+
+Host checks still pass:
+
+```sh
+make test
+```
+
+The board image was run with:
+
+```sh
+make qemu
+```
+
+which executes:
+
+```sh
+qemu-system-arm -machine mps2-an386 -kernel build/litert.elf \
+  -display none -monitor none -serial stdio \
+  -semihosting-config enable=on,target=native
+```
+
+Observed stdout, and QEMU then exited 0 because of the semihosting `BKPT 0xAB`:
+
+```
+A0
+B0
+A1
+B1
+A2
+B2
+A3
+B3
+done
+mps2-an386 transcript ok
+```
+
+`A` reached `i == 3` and yielded. `B` then printed `B3` and stopped the emulator, which is why there is no further line from `A`. Each counter advanced only while its own task was running.
+
+### Experiments
+
+1. Comment out `litert_yield()` in `worker` and run `make qemu`. Only `A0` should appear, then the run hangs until the script times out. `B` is ready in the sense that its stack exists, but nothing ever switches to it.
+2. In `litert_switch_next()`, always return `slots[0]`. Predict `A0` through `A3` and no `B` lines. The second TCB is never restored.
+
+### Explicitly not in this step
+
+No third task, no priority, no ready list, no SysTick, no PendSV, no blocking, no critical section. A task cannot be forced off the core.
+
+### Next increment
+
+Step 3: three tasks, a ready set, and priority. The switch assembly can stay. What changes is `litert_switch_next()`: choose the highest-priority ready task, and show a low-priority task starving when a higher-priority task is always ready. Still no timer.
 
 ## Step 3 — Cooperative scheduler
 

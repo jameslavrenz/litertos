@@ -1,10 +1,21 @@
 /*
- * LiteRTOS — task creation and initial stack frame.
+ * Phase 1 — QEMU mps2-an386. Shared with Phase 2 (STM32F446): yes.
+ * Step 1 — Task creation and stack initialization.
  *
  * This header is the Cortex-M (no FPU) contract for a brand-new task.
- * Nothing here switches tasks. A later increment's context restore must
- * pop registers in the order documented below; portable scheduler code
- * should treat the frame as private to the architecture port.
+ * The SVC handler (Step 2) and the future PendSV handler (Step 4) must
+ * pop registers in the order documented below. Step 3 adds priority to
+ * the TCB. Step 5 adds task state. Neither step changes this frame.
+ * Phase 2 keeps the same struct and the same frame.
+ *
+ * File map, so later steps stay labeled the same way:
+ *   Step 1  task.h, task_stack.c, tests/test_task_stack.c
+ *   Step 2  sched.h, sched.c, context.s, startup.s, demo_main.c
+ *   Step 3  replace litert_switch_next(); raise LITERT_MAX_TASKS
+ *   Step 4  SysTick_Handler and PendSV_Handler in startup.s / context.s
+ *   Step 5  task state, delay, semaphore, mutex, fault handler
+ *   Phase 2 replaces startup.s, the linker script, and the demo UART.
+ *           It does not replace the kernel files above.
  *
  * Pointer width
  * -------------
@@ -22,12 +33,12 @@
 /*
  * Initial exception frame, lowest address first.
  *
- * A future context switch saves callee-saved registers with the ARM
+ * The cooperative switch saves callee-saved registers with the ARM
  * instruction STMDB sp!, {r4-r11}, which stores R4 at the lowest address
- * and R11 just below the hardware frame. Exception entry hardware then
- * stacks the remaining registers in the fixed order R0, R1, R2, R3, R12,
- * LR, PC, xPSR (ARMv7-M). Building both parts now means the first restore
- * can be the inverse of that sequence.
+ * and R11 just below the hardware frame. Exception entry hardware stacks
+ * the remaining registers in the fixed order R0, R1, R2, R3, R12, LR, PC,
+ * xPSR (ARMv7-M). Building both parts here means the first restore is the
+ * inverse of that sequence.
  *
  *   higher addresses
  *   +------------------+
@@ -90,16 +101,21 @@ enum {
 
 typedef enum litert_status {
     LITERT_OK = 0,
-    LITERT_ERR_PARAM,    /* NULL tcb or NULL stack */
+    LITERT_ERR_PARAM,    /* NULL tcb, stack, or entry */
     LITERT_ERR_NO_STACK, /* stack_words < LITERT_FRAME_WORDS */
-    LITERT_ERR_ALIGN     /* buffer or top of stack is not 8-byte aligned */
+    LITERT_ERR_ALIGN,    /* buffer or top of stack is not 8-byte aligned */
+    LITERT_ERR_FULL      /* the two-task cooperative kernel already has two tasks */
 } litert_status_t;
 
 /*
- * sp is first so a later assembly switch can load it from offset 0 of the
- * TCB. stack points at the lowest word of the caller-provided buffer.
- * The buffer itself is not owned or freed here; allocation is static and
- * remains the caller's responsibility.
+ * Phase 1, Step 1. sp is first so Step 2 (and Step 4) can load it from
+ * offset 0. stack points at the lowest word of the caller-provided buffer.
+ * The buffer is not owned or freed here.
+ *
+ * Not in this struct yet:
+ *   Step 3  priority
+ *   Step 5  state (ready, running, blocked) and the reason the task is waiting
+ * Phase 2 adds no fields.
  */
 typedef struct litert_tcb {
     uint32_t *sp;

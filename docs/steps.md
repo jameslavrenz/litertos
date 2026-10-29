@@ -1,6 +1,6 @@
 # The five steps
 
-Preliminary map of LiteRTOS. It explains the real-time operating system ideas each step introduces, and how the steps differ. It describes the plan. Step 1 matches the code already in the tree. Steps 2–5 will be revised here if the design changes.
+Preliminary map of LiteRTOS. It explains the real-time operating system ideas each step introduces, and how the steps differ. It describes the plan. Steps 1 and 2 match the code in the tree. Steps 3–5 will be revised here if the design changes. How to build and run the checks is in the root `README.md`.
 
 What has actually been built, including register layouts and test results, is in `docs/implementation.md`. Update that file when an increment lands. Update this file when the meaning of a step changes.
 
@@ -44,7 +44,7 @@ After this step you can point a debugger or a unit test at a TCB and see the PC,
 
 ## Step 2 — Run two tasks that cooperate
 
-**Status: not started.** This is the first step that uses QEMU, a program on the Mac that behaves like the Cortex-M4 board.
+**Status: done.** The writeup is in `docs/implementation.md`. This is the first step that uses QEMU, a program on the Mac that behaves like the Cortex-M4 board. The switch is an SVC exception, so the processor stacks the same hardware frame Step 1 built by hand.
 
 Step 2 takes the memory image from Step 1 and actually loads it. Starting a task means writing its saved stack pointer into the PSP and performing an exception return, which pops the registers and jumps to the task's PC. That return needs a few assembly instructions. C can compute addresses, but it cannot reliably write the special registers that select the stack and trigger the return.
 

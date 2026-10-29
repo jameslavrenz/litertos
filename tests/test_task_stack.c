@@ -1,4 +1,7 @@
 /*
+ * Phase 1, Step 1. Host test, not a QEMU image. Still valid in Phase 2
+ * because the frame layout is shared. Steps 2–5 do not change these checks.
+ *
  * Host-side check of the Cortex-M initial stack frame.
  *
  * The frame is an array of uint32_t register images. On this 64-bit Mac
